@@ -27,7 +27,11 @@ library
   exposed-modules:
       Calculation.Absorption
       Calculation.Geometry
+      Calculation.Reverberation
+      Evaluation.Suitability
+      Input.CSV
       Lib
+      Storage.JSON
       Types.AcousticResult
       Types.AppError
       Types.Event
@@ -45,7 +49,12 @@ library
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.18 && <5
+    , bytestring
+    , cassava
+    , text
+    , vector
   default-language: Haskell2010
 
 executable AcousticProject-exe
@@ -59,7 +68,12 @@ executable AcousticProject-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       AcousticProject
-    , base >=4.7 && <5
+    , aeson
+    , base >=4.18 && <5
+    , bytestring
+    , cassava
+    , text
+    , vector
   default-language: Haskell2010
 
 test-suite AcousticProject-test
@@ -74,5 +88,10 @@ test-suite AcousticProject-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       AcousticProject
-    , base >=4.7 && <5
+    , aeson
+    , base >=4.18 && <5
+    , bytestring
+    , cassava
+    , text
+    , vector
   default-language: Haskell2010
