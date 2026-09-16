@@ -75,6 +75,15 @@ recommendAdd event acoustic items
                             acoustic
                             item
 
+                    newAbsorption =
+                        absorptionArea acoustic
+                            + calculateItemAbsorption item
+
+                    newReverb =
+                        calculateReverberationTime
+                            (roomVolume acoustic)
+                            newAbsorption
+
                     newAcoustic =
                         AcousticResult
                             { roomVolume =
@@ -84,15 +93,6 @@ recommendAdd event acoustic items
                             , reverberationTime =
                                 newReverb
                             }
-
-                    newAbsorption =
-                        absorptionArea acoustic
-                            + calculateItemAbsorption item
-
-                    newReverb =
-                        calculateReverberationTime
-                            (roomVolume acoustic)
-                            newAbsorption
 
                 in recommendation
                     : recommendAdd
@@ -120,16 +120,6 @@ recommendRemove event acoustic items
                             acoustic
                             item
 
-                    newAcoustic =
-                        AcousticResult
-                            { roomVolume =
-                                roomVolume acoustic
-                            , absorptionArea =
-                                newAbsorption
-                            , reverberationTime =
-                                newReverb
-                            }
-
                     newAbsorption =
                         max
                             0
@@ -140,6 +130,16 @@ recommendRemove event acoustic items
                         calculateReverberationTime
                             (roomVolume acoustic)
                             newAbsorption
+
+                    newAcoustic =
+                        AcousticResult
+                            { roomVolume =
+                                roomVolume acoustic
+                            , absorptionArea =
+                                newAbsorption
+                            , reverberationTime =
+                                newReverb
+                            }
 
                 in recommendation
                     : recommendRemove
@@ -153,17 +153,13 @@ makeIncreaseRecommendation event acoustic item =
     Recommendation
         { action =
             "Добавить " ++ itemName item
-
         , materialName =
             Material.materialName
                 (itemMaterial item)
-
         , previousReverb =
             oldReverb
-
         , newReverb =
             newReverb
-
         , result =
             newSuitability
         }
@@ -201,17 +197,13 @@ makeDecreaseRecommendation event acoustic item =
     Recommendation
         { action =
             "Убрать " ++ itemName item
-
         , materialName =
             Material.materialName
                 (itemMaterial item)
-
         , previousReverb =
             oldReverb
-
         , newReverb =
             newReverb
-
         , result =
             newSuitability
         }
