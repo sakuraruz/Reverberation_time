@@ -2,9 +2,13 @@
 
 module Input.CSV
     ( showMaterials
+    , showRemovableMaterials
     , getMaterialByNumber
+    , getRemovableMaterialByNumber
     , showEventRequirements
     , getEventRequirementByNumber
+    , loadMaterials
+    , loadEvents
     ) where
 
 import Control.Exception (IOException, try)
@@ -145,6 +149,34 @@ getMaterialByNumber filePath number = do
                 Just material ->
                     pure (Right material)
 
+getRemovableMaterialByNumber
+    :: FilePath
+    -> Int
+    -> IO (Either AppError Material)
+getRemovableMaterialByNumber filePath number = do
+    result <- loadMaterials filePath
+
+    case result of
+        Left err ->
+            pure (Left err)
+
+        Right materials ->
+            let removableMaterials =
+                    filter removable materials
+            in
+                case lookup
+                    number
+                    (zip [1..] removableMaterials) of
+
+                    Nothing ->
+                        pure
+                            (Left
+                                (NotFound
+                                    "Регулируемый материал с таким номером не найден"))
+
+                    Just material ->
+                        pure (Right material)
+
 
 showEventRequirements
     :: FilePath
@@ -195,3 +227,40 @@ getEventRequirementByNumber filePath number = do
 
                 Just event ->
                     pure (Right event)
+
+showRemovableMaterials
+    :: FilePath
+    -> IO (Either AppError [(Int, Material)])
+showRemovableMaterials filePath = do
+    result <- loadMaterials filePath
+
+    case result of
+        Left err ->
+            pure (Left err)
+
+        Right materials -> do
+            let removableMaterials =
+                    filter removable materials
+
+            putStrLn "Доступные регулируемые материалы:"
+
+            mapM_
+                printRemovableMaterial
+                (zip [1..] removableMaterials)
+
+            pure
+                (Right
+                    (zip [1..] removableMaterials))
+
+printRemovableMaterial
+    :: (Int, Material)
+    -> IO ()
+printRemovableMaterial
+    (number, material) =
+    putStrLn $
+        show number
+            ++ ". "
+            ++ materialName material
+            ++ " (коэффициент поглощения: "
+            ++ show (absorptionCoefficient material)
+            ++ ")"
