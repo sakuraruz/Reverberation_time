@@ -15,7 +15,6 @@ data Material = Material
     { materialName          :: String
     , absorptionCoefficient :: Double
     , removable             :: Bool
-    , averageArea           :: Maybe Double
     }
     deriving (Show, Eq)
 
@@ -37,7 +36,6 @@ instance ToJSON Material where
             [ "materialName"          .= materialName material
             , "absorptionCoefficient" .= absorptionCoefficient material
             , "removable"             .= removable material
-            , "averageArea"           .= averageArea material
             ]
 
 instance FromJSON Material where
@@ -46,7 +44,6 @@ instance FromJSON Material where
             <$> object .: "materialName"
             <*> object .: "absorptionCoefficient"
             <*> object .: "removable"
-            <*> object .: "averageArea"
 
 
 instance ToJSON Surface where

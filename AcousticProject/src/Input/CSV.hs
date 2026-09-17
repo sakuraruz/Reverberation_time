@@ -33,7 +33,6 @@ instance FromNamedRecord Material where
             <$> r .: "material_name"
             <*> r .: "absorption_coefficient"
             <*> parseRemovable r
-            <*> parseAverageArea r
 
 
 parseRemovable :: NamedRecord -> Parser Bool
@@ -49,15 +48,6 @@ parseRemovable r = do
 
         _ ->
             fail ("Invalid removable value: " ++ value)
-
-
-parseAverageArea :: NamedRecord -> Parser (Maybe Double)
-parseAverageArea r = do
-    value <- r .: "average_area" :: Parser String
-
-    if null value
-        then pure Nothing
-        else pure (Just (read value))
 
 
 instance FromNamedRecord EventRequirement where
