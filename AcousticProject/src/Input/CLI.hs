@@ -195,6 +195,11 @@ mainMenu materialsPath eventsPath = do
         _ -> do
             putStrLn ""
             putStrLn "Ошибка: некорректный пункт меню."
+
+            _ <-
+                logWarning
+                    logFile
+                    ("Некорректный пункт меню: " ++ input)
             mainMenu materialsPath eventsPath
 
 
@@ -596,7 +601,6 @@ readAdjustableItemsLoop
 readEvent :: FilePath -> IO (Either AppError EventRequirement)
 readEvent eventsPath = do
     putStrLn ""
-    putStrLn "Доступные мероприятия:"
 
     showResult <- showEventRequirements eventsPath
 
@@ -884,6 +888,12 @@ readInt message = do
     case readMaybe input of
         Nothing -> do
             putStrLn "Ошибка: нужно ввести целое число."
+
+            _ <-
+                logWarning
+                        logFile
+                        ("Некорректный ввод целого числа: " ++ input)
+
             readInt message
 
         Just value ->
@@ -904,6 +914,14 @@ readPositiveInt message = do
                 pure (Right value)
             else do
                 putStrLn "Ошибка: число должно быть больше нуля."
+
+                _ <-
+                    logWarning
+                            logFile
+                            ( "Некорректное положительное число: "
+                                ++ show value
+                            )
+
                 readPositiveInt message
 
 
@@ -921,6 +939,14 @@ readNonNegativeInt message = do
                 pure (Right value)
             else do
                 putStrLn "Ошибка: число не может быть отрицательным."
+
+                _ <-
+                    logWarning
+                        logFile
+                        ( "Некорректное положительное число: "
+                            ++ show value
+                        )
+
                 readNonNegativeInt message
 
 
@@ -934,6 +960,12 @@ readDouble message = do
     case readMaybe input of
         Nothing -> do
             putStrLn "Ошибка: нужно ввести число."
+
+            _ <-
+                logWarning
+                    logFile
+                    ("Некорректный ввод числа: " ++ input)
+
             readDouble message
 
         Just value ->
@@ -954,6 +986,14 @@ readPositiveDouble message = do
                 pure (Right value)
             else do
                 putStrLn "Ошибка: число должно быть больше нуля."
+
+                _ <-
+                    logWarning
+                            logFile
+                            ( "Некорректное положительное число: "
+                                ++ show value
+                            )
+
                 readPositiveDouble message
 
 readIntInRange
@@ -979,6 +1019,17 @@ readIntInRange message minValue maxValue = do
                         ++ " до "
                         ++ show maxValue
                         ++ "."
+                _ <-
+                    logWarning
+                        logFile
+                        ( "Число вне допустимого диапазона: "
+                            ++ show value
+                            ++ " (ожидалось от "
+                            ++ show minValue
+                            ++ " до "
+                            ++ show maxValue
+                            ++ ")"
+                        )
                 readIntInRange
                     message
                     minValue
