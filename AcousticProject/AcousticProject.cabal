@@ -29,8 +29,12 @@ library
       Calculation.Geometry
       Calculation.Reverberation
       Evaluation.Suitability
+      Input.CLI
       Input.CSV
       Lib
+      Log.Logger
+      Output.Report
+      Recommendation.Acoustic
       Storage.JSON
       Types.AcousticResult
       Types.AppError

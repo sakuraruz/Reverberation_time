@@ -11,8 +11,6 @@ module Input.CLI
     , readEvent
     ) where
 
-import Text.Read (readMaybe)
-
 import Types.AppError
 import Types.Geometry
 import Types.Material
@@ -77,6 +75,12 @@ import Output.Report
     ( saveReport
     )
 
+import Log.Logger
+    ( logInfo
+    , logWarning
+    , logError
+    )
+
 
 roomsFile :: FilePath
 roomsFile = "data/rooms.json"
@@ -84,6 +88,9 @@ roomsFile = "data/rooms.json"
 
 reportFile :: FilePath
 reportFile = "data/report.txt"
+
+logFile :: FilePath
+logFile = "data/app.log"
 
 
 mainMenu :: FilePath -> FilePath -> IO (Either AppError ())
@@ -108,6 +115,12 @@ mainMenu materialsPath eventsPath = do
 
             case result of
                 Left err -> do
+                    _ <-
+                        logError
+                            logFile
+                            ("Ошибка создания помещения: "
+                                ++ show err)
+
                     printError err
                     pure (Left err)
 
@@ -116,19 +129,43 @@ mainMenu materialsPath eventsPath = do
 
                     case saveResult of
                         Left err -> do
+                            _ <-
+                                logError
+                                    logFile
+                                    ("Ошибка сохранения помещения: "
+                                        ++ show err)
+
                             printError err
                             pure (Left err)
 
                         Right () -> do
                             putStrLn ""
                             putStrLn "Помещение успешно сохранено."
-                            mainMenu materialsPath eventsPath
+
+                            logResult <-
+                                logInfo
+                                    logFile
+                                    ("Помещение сохранено: " ++ roomName room)
+
+                            case logResult of
+                                Left err -> do
+                                    printError err
+                                    pure (Left err)
+
+                                Right () ->
+                                    mainMenu materialsPath eventsPath
 
         "2" -> do
             result <- showRooms roomsFile
 
             case result of
                 Left err -> do
+                    _ <-
+                        logError
+                            logFile
+                            ("Ошибка чтения помещений: "
+                                ++ show err)
+
                     printError err
                     pure (Left err)
 
@@ -140,6 +177,12 @@ mainMenu materialsPath eventsPath = do
 
             case result of
                 Left err -> do
+                    _ <-
+                        logError
+                            logFile
+                            ("Ошибка проверки помещения: "
+                                ++ show err)
+
                     printError err
                     pure (Left err)
 
@@ -733,13 +776,20 @@ checkRoom eventsPath = do
                                                 putStrLn ""
 
                                                 if suitable suitability
-                                                then
-                                                    putStrLn
-                                                        "Помещение соответствует нормативу."
-                                                else
-                                                    putStrLn
-                                                        "Помещение не соответствует нормативу."
-
+                                                then do
+                                                    _ <-
+                                                        logInfo
+                                                            logFile
+                                                            ("Помещение соответствует требованиям: "
+                                                                ++ roomName room)
+                                                    pure ()
+                                                else do
+                                                    _ <-
+                                                        logWarning
+                                                            logFile
+                                                            ("Помещение не соответствует требованиям: "
+                                                                ++ roomName room)
+                                                    pure ()
                                                 putStrLn ""
                                                 putStrLn "=== РЕКОМЕНДАЦИИ ==="
 
@@ -760,7 +810,13 @@ checkRoom eventsPath = do
                                                         report
 
                                                 case reportResult of
-                                                    Left err ->
+                                                    Left err -> do
+                                                        _ <-
+                                                            logError
+                                                                logFile
+                                                                ("Ошибка сохранения отчёта: "
+                                                                    ++ show err)
+
                                                         pure (Left err)
 
                                                     Right () -> do
@@ -768,6 +824,11 @@ checkRoom eventsPath = do
                                                         putStrLn $
                                                             "Отчёт сохранён в: "
                                                                 ++ reportFile
+                                                        _ <-
+                                                            logInfo
+                                                                logFile
+                                                                ("Отчёт сохранён для помещения: "
+                                                                    ++ roomName room)
                                                         pure (Right ())
 
 
