@@ -1,15 +1,24 @@
-module Types.Recommendation where
+module Types.Recommendation
+    (Action(..)
+    , Recommendation(..)
+    ) where
 
-import Types.Room
+import Types.Spectrum
 import Types.Material
-import Types.Event
-import Types.AcousticResult
+import Types.Room
 import Types.Suitability
 
+data Action
+    = Add
+    | Remove
+    deriving (Show, Eq)
+
 data Recommendation = Recommendation
-    { action         :: String
-    , materialName   :: String
-    , previousReverb :: Double
-    , newReverb      :: Double
-    , result         :: SuitabilityResult
+    { action          :: Action
+    , targetElement   :: DecorMaterial
+    , targetSurface   :: SurfaceId
+    , recommendedArea :: Double
+    , previousReverb  :: Spectrum
+    , newReverb       :: Spectrum
+    , newSuitability  :: SuitabilityResult
     } deriving (Show, Eq)
