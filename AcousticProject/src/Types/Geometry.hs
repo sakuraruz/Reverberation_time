@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Types.Geometry where
+module Types.Geometry
+    ( Dimensions(..)
+    ) where
 
 import Data.Aeson
     ( FromJSON(..)
@@ -18,7 +20,6 @@ data Dimensions = Dimensions
     , roomHeight :: Double
     } deriving (Show, Eq)
 
-type Volume = Double
 
 instance ToJSON Dimensions where
     toJSON dimensions =
