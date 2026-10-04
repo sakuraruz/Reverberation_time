@@ -1,14 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Input.CSV
-    ( showMaterials
-    , showRemovableMaterials
-    , getMaterialByNumber
-    , getRemovableMaterialByNumber
-    , showEventRequirements
-    , getEventRequirementByNumber
-    , loadMaterials
-    , loadEvents
+    ( loadSurfaceMaterials
+    , loadDoorMaterials
+    , loadWindowMaterials
+    , loadWallDecor
+    , loadFloorDecor
+    , loadSeatMaterials
+    , loadPurpose
     ) where
 
 import Control.Exception (IOException, try)
@@ -23,234 +22,107 @@ import Data.Csv
 import qualified Data.Vector as V
 
 import Types.AppError
+    ( AppError(..)
+    )
+import Types.Spectrum
 import Types.Material
-import Types.Event
+import Types.Purpose
 
-
-instance FromNamedRecord Material where
+instance FromNamedRecord Spectrum where
     parseNamedRecord r =
-        Material
+        Spectrum
+            <$> r .: "alpha_125"
+            <*> r .: "alpha_500"
+            <*> r .: "alpha_2000"
+
+instance FromNamedRecord SurfaceMaterial where
+    parseNamedRecord r =
+        SurfaceMaterial
             <$> r .: "material_name"
-            <*> r .: "absorption_coefficient"
-            <*> parseRemovable r
+            <*> parseNamedRecord r
 
 
-parseRemovable :: NamedRecord -> Parser Bool
-parseRemovable r = do
-    value <- r .: "removable" :: Parser String
+loadSurfaceMaterials :: FilePath -> IO (Either AppError [SurfaceMaterial])
+loadSurfaceMaterials = loadCsv
 
-    case value of
-        "true" ->
-            pure True
-
-        "false" ->
-            pure False
-
-        _ ->
-            fail ("Invalid removable value: " ++ value)
-
-
-instance FromNamedRecord EventRequirement where
+instance FromNamedRecord DoorMaterial where
     parseNamedRecord r =
-        EventRequirement
-            <$> (EventType <$> r .: "event_name")
-            <*> ((,) <$> r .: "min_reverb" <*> r .: "max_reverb")
+        DoorMaterial
+            <$> r .: "door_name"
+            <*> parseNamedRecord r
 
 
-loadMaterials :: FilePath -> IO (Either AppError [Material])
-loadMaterials filePath = do
-    result <- try (BL.readFile filePath)
+loadDoorMaterials :: FilePath -> IO (Either AppError [DoorMaterial])
+loadDoorMaterials = loadCsv
+
+instance FromNamedRecord WindowMaterial where
+    parseNamedRecord r =
+        WindowMaterial
+            <$> r .: "window_name"
+            <*> parseNamedRecord r
+
+
+loadWindowMaterials :: FilePath -> IO (Either AppError [WindowMaterial])
+loadWindowMaterials = loadCsv
+
+instance FromNamedRecord DecorMaterial where
+    parseNamedRecord r =
+        DecorMaterial
+            <$> r .: "decor_name"
+            <*> parseNamedRecord r
+
+
+loadWallDecor :: FilePath -> IO (Either AppError [DecorMaterial])
+loadWallDecor = loadCsv
+
+
+loadFloorDecor :: FilePath -> IO (Either AppError [DecorMaterial])
+loadFloorDecor = loadCsv
+
+instance FromNamedRecord SeatMaterial where
+    parseNamedRecord r =
+        SeatMaterial
+            <$> r .: "seat_name"
+            <*> parseEquivalentArea r
+            <*> r .: "floor_area"
+
+
+parseEquivalentArea :: NamedRecord -> Parser Spectrum
+parseEquivalentArea r =
+    Spectrum
+        <$> r .: "area_125"
+        <*> r .: "area_500"
+        <*> r .: "area_2000"
+
+
+loadSeatMaterials :: FilePath -> IO (Either AppError [SeatMaterial])
+loadSeatMaterials = loadCsv
+
+instance FromNamedRecord PurposeReq where
+    parseNamedRecord r =
+        PurposeReq
+            <$> r .: "purpose_name"
+            <*> parseReverbSpectrum r
+
+
+parseReverbSpectrum :: NamedRecord -> Parser ReverbSpectrum
+parseReverbSpectrum r =
+    ReverbSpectrum
+        <$> (Range <$> r .: "min_125"  <*> r .: "max_125")
+        <*> (Range <$> r .: "min_500"  <*> r .: "max_500")
+        <*> (Range <$> r .: "min_2000" <*> r .: "max_2000")
+
+
+loadPurpose :: FilePath -> IO (Either AppError [PurposeReq])
+loadPurpose = loadCsv
+
+loadCsv :: FromNamedRecord a => FilePath -> IO (Either AppError [a])
+loadCsv filePath = do
+    readResult <- try (BL.readFile filePath)
         :: IO (Either IOException BL.ByteString)
-
-    case result of
-        Left err ->
-            pure (Left (FileError (show err)))
-
+    case readResult of
+        Left err -> pure (Left (FileError (show err)))
         Right content ->
             case decodeByName content of
-                Left err ->
-                    pure (Left (ParseError err))
-
-                Right (_, records) ->
-                    pure (Right (V.toList records))
-
-
-loadEvents :: FilePath -> IO (Either AppError [EventRequirement])
-loadEvents filePath = do
-    result <- try (BL.readFile filePath)
-        :: IO (Either IOException BL.ByteString)
-
-    case result of
-        Left err ->
-            pure (Left (FileError (show err)))
-
-        Right content ->
-            case decodeByName content of
-                Left err ->
-                    pure (Left (ParseError err))
-
-                Right (_, records) ->
-                    pure (Right (V.toList records))
-
-
-showMaterials :: FilePath -> IO (Either AppError ())
-showMaterials filePath = do
-    result <- loadMaterials filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right materials -> do
-            putStrLn "Доступные материалы:"
-
-            mapM_ printMaterial (zip [1..] materials)
-
-            pure (Right ())
-
-
-printMaterial :: (Int, Material) -> IO ()
-printMaterial (number, material) =
-    putStrLn $
-        show number
-        ++ ". "
-        ++ materialName material
-        ++ " (коэффициент поглощения: "
-        ++ show (absorptionCoefficient material)
-        ++ ")"
-
-
-getMaterialByNumber
-    :: FilePath
-    -> Int
-    -> IO (Either AppError Material)
-getMaterialByNumber filePath number = do
-    result <- loadMaterials filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right materials ->
-            case lookup number (zip [1..] materials) of
-                Nothing ->
-                    pure (Left (NotFound "Материал с таким номером не найден"))
-
-                Just material ->
-                    pure (Right material)
-
-getRemovableMaterialByNumber
-    :: FilePath
-    -> Int
-    -> IO (Either AppError Material)
-getRemovableMaterialByNumber filePath number = do
-    result <- loadMaterials filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right materials ->
-            let removableMaterials =
-                    filter removable materials
-            in
-                case lookup
-                    number
-                    (zip [1..] removableMaterials) of
-
-                    Nothing ->
-                        pure
-                            (Left
-                                (NotFound
-                                    "Регулируемый материал с таким номером не найден"))
-
-                    Just material ->
-                        pure (Right material)
-
-
-showEventRequirements
-    :: FilePath
-    -> IO (Either AppError ())
-showEventRequirements filePath = do
-    result <- loadEvents filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right events -> do
-            putStrLn "Доступные типы мероприятий:"
-
-            mapM_ printEvent (zip [1..] events)
-
-            pure (Right ())
-
-
-printEvent :: (Int, EventRequirement) -> IO ()
-printEvent (number, requirement) =
-    putStrLn $
-        show number
-        ++ ". "
-        ++ eventName (eventType requirement)
-        ++ " (норма RT60: "
-        ++ show (fst (recommendedReverb requirement))
-        ++ " - "
-        ++ show (snd (recommendedReverb requirement))
-        ++ " с)"
-
-
-getEventRequirementByNumber
-    :: FilePath
-    -> Int
-    -> IO (Either AppError EventRequirement)
-getEventRequirementByNumber filePath number = do
-    result <- loadEvents filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right events ->
-            case lookup number (zip [1..] events) of
-                Nothing ->
-                    pure (Left (NotFound "Мероприятие с таким номером не найдено"))
-
-                Just event ->
-                    pure (Right event)
-
-showRemovableMaterials
-    :: FilePath
-    -> IO (Either AppError [(Int, Material)])
-showRemovableMaterials filePath = do
-    result <- loadMaterials filePath
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right materials -> do
-            let removableMaterials =
-                    filter removable materials
-
-            putStrLn "Доступные регулируемые материалы:"
-
-            mapM_
-                printRemovableMaterial
-                (zip [1..] removableMaterials)
-
-            pure
-                (Right
-                    (zip [1..] removableMaterials))
-
-printRemovableMaterial
-    :: (Int, Material)
-    -> IO ()
-printRemovableMaterial
-    (number, material) =
-    putStrLn $
-        show number
-            ++ ". "
-            ++ materialName material
-            ++ " (коэффициент поглощения: "
-            ++ show (absorptionCoefficient material)
-            ++ ")"
+                Left err -> pure (Left (ParseError err))
+                Right (_, records) -> pure (Right (V.toList records))
