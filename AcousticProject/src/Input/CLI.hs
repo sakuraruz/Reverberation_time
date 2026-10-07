@@ -1,1046 +1,991 @@
 module Input.CLI
     ( mainMenu
-    , createRoom
-    , readRoomName
-    , readDimensions
-    , readSurface
-    , readSurfaces
-    , readAdjustableItem
-    , readAdjustableItems
-    , checkRoom
-    , readEvent
     ) where
 
+import Control.Monad (forM_)
+import Data.Maybe (fromMaybe)
+import System.IO (hFlush, stdout)
+import Text.Read (readMaybe)
+
 import Types.AppError
-import Types.Geometry
+import Types.Spectrum
 import Types.Material
-    ( Surface(..)
-    )
-import qualified Types.Material as Material
-    ( materialName
-    )
 import Types.Room
-import Types.Event
+import Types.Geometry
+import Types.Purpose
 import Types.AcousticResult
 import Types.Suitability
 import Types.Recommendation
 import Types.Report
-import Text.Read
-    ( readMaybe
-    )
-import System.IO
-    ( hFlush
-    , stdout
-    )
 
 import Input.CSV
-    ( showMaterials
-    , showRemovableMaterials
-    , getMaterialByNumber
-    , getRemovableMaterialByNumber
-    , showEventRequirements
-    , getEventRequirementByNumber
-    , loadMaterials
-    , loadEvents
-    )
-
 import Storage.JSON
-    ( loadRooms
-    , addRoom
-    , showRooms
-    , getRoomByNumber
-    )
+import Output.Report
+import Batch.Check
 
 import Calculation.Geometry
-    ( calculateVolume
-    )
-
 import Calculation.Absorption
-    ( calculateAbsorptionArea
-    )
-
 import Calculation.Reverberation
-    ( calculateReverberationTime
-    )
 
 import Evaluation.Suitability
-    ( evaluateSuitability
-    )
 
 import Recommendation.Acoustic
-    ( generateRecommendations
-    )
-
-import Output.Report
-    ( saveReport
-    )
 
 import Log.Logger
-    ( logInfo
-    , logWarning
-    , logError
-    )
 
-
-roomsFile :: FilePath
-roomsFile = "data/rooms.json"
-
-
-reportFile :: FilePath
-reportFile = "data/report.txt"
+materialsDir :: FilePath
+materialsDir = "data"
 
 logFile :: FilePath
 logFile = "data/app.log"
 
+reportDir :: FilePath
+reportDir = "data/reports"
 
-mainMenu :: FilePath -> FilePath -> IO (Either AppError ())
-mainMenu materialsPath eventsPath = do
+summaryReport :: FilePath
+summaryReport = "data/summary.txt"
+
+roomsDir :: FilePath
+roomsDir = "data/rooms"
+
+mainMenu :: IO (Either AppError ())
+mainMenu = do
+
     putStrLn ""
-    putStrLn "======================================"
-    putStrLn "     АКУСТИЧЕСКИЙ АНАЛИЗ ПОМЕЩЕНИЯ"
-    putStrLn "======================================"
-    putStrLn "1. Создать помещение"
-    putStrLn "2. Просмотреть сохранённые помещения"
-    putStrLn "3. Проверить помещение"
+    putStrLn "========================================"
+    putStrLn "   АКУСТИЧЕСКАЯ ОЦЕНКА ПОМЕЩЕНИЯ"
+    putStrLn "========================================"
+    putStrLn "1. Создать и проверить помещение"
+    putStrLn "2. Создать и сохранить помещение"
+    putStrLn "3. Пакетная проверка из файла"
+    putStrLn "4. Просмотреть сохранённые помещения"
+    putStrLn "5. Удалить помещение"
     putStrLn "0. Выход"
-    putStrLn "======================================"
-    putStr "Выберите действие: "
+    putStrLn "========================================"
+    putStr "Выбор: "
     hFlush stdout
 
     input <- getLine
-
     case input of
         "1" -> do
-            result <- createRoom materialsPath
-
-            case result of
-                Left err -> do
-                    _ <-
-                        logError
-                            logFile
-                            ("Ошибка создания помещения: "
-                                ++ show err)
-
-                    printError err
-                    pure (Left err)
-
-                Right room -> do
-                    saveResult <- addRoom roomsFile room
-
-                    case saveResult of
-                        Left err -> do
-                            _ <-
-                                logError
-                                    logFile
-                                    ("Ошибка сохранения помещения: "
-                                        ++ show err)
-
-                            printError err
-                            pure (Left err)
-
-                        Right () -> do
-                            putStrLn ""
-                            putStrLn "Помещение успешно сохранено."
-
-                            logResult <-
-                                logInfo
-                                    logFile
-                                    ("Помещение сохранено: " ++ roomName room)
-
-                            case logResult of
-                                Left err -> do
-                                    printError err
-                                    pure (Left err)
-
-                                Right () ->
-                                    mainMenu materialsPath eventsPath
-
+            result <- createAndCheck
+            handleResult result
+            mainMenu
         "2" -> do
-            result <- showRooms roomsFile
-
-            case result of
-                Left err -> do
-                    _ <-
-                        logError
-                            logFile
-                            ("Ошибка чтения помещений: "
-                                ++ show err)
-
-                    printError err
-                    pure (Left err)
-
-                Right () ->
-                    mainMenu materialsPath eventsPath
-
+            result <- createAndSave
+            handleResult result
+            mainMenu
         "3" -> do
-            result <- checkRoom eventsPath
-
-            case result of
+            result <- batchCheck
+            handleResult result
+            mainMenu
+        "4" -> do
+            fileResult <- chooseExistingFileInDir roomsDir
+            case fileResult of
+                Left (InvalidInput _) -> do
+                    putStrLn "Операция отменена."
+                    mainMenu
                 Left err -> do
-                    _ <-
-                        logError
-                            logFile
-                            ("Ошибка проверки помещения: "
-                                ++ show err)
-
                     printError err
-                    pure (Left err)
-
-                Right () ->
-                    mainMenu materialsPath eventsPath
-
-        "0" ->
+                    mainMenu
+                Right file -> do
+                    _ <- showRooms file
+                    mainMenu
+        "5" -> do
+            fileResult <- chooseExistingFileInDir roomsDir
+            case fileResult of
+                Left _ -> mainMenu
+                Right file -> do
+                    _ <- deleteRoomMenu file
+                    mainMenu
+        "0" -> do
             pure (Right ())
-
         _ -> do
-            putStrLn ""
-            putStrLn "Ошибка: некорректный пункт меню."
+            putStrLn "Некорректный пункт меню."
+            _ <- logWarning logFile ("Некорректный пункт: " ++ input)
+            mainMenu
 
-            _ <-
-                logWarning
-                    logFile
-                    ("Некорректный пункт меню: " ++ input)
-            mainMenu materialsPath eventsPath
+createAndCheck :: IO (Either AppError ())
+createAndCheck = do
+    roomResult <- createRoom
+    case roomResult of
+        Left err -> pure (Left err)
+        Right room -> do
+            purposeResult <- readPurpose
+            case purposeResult of
+                Left err -> pure (Left err)
+                Right purpose -> do
+                    checkRoom room purpose
+                    pure (Right ())
 
+createAndSave :: IO (Either AppError ())
+createAndSave = do
+    roomResult <- createRoom
+    case roomResult of
+        Left err -> pure (Left err)
+        Right room -> do
+            fileResult <- chooseOrCreateFileInDir roomsDir
+            case fileResult of
+                Left err -> pure (Left err)
+                Right file -> do
+                    result <- addRoom file room False
+                    case result of
+                        Left (InvalidInput msg) -> do
+                            putStrLn msg
+                            putStr "Перезаписать? (y/n): "
+                            hFlush stdout
+                            answer <- getLine
+                            if answer == "y"
+                                then addRoom file room True
+                                else pure (Right ())
+                        other -> pure other
 
-createRoom
-    :: FilePath
-    -> IO (Either AppError Room)
-createRoom materialsPath = do
+batchCheck :: IO (Either AppError ())
+batchCheck = do
+    fileResult <- chooseExistingFileInDir roomsDir
+    case fileResult of
+        Left _ -> mainMenu
+        Right file -> do
 
-    putStrLn ""
-    putStrLn "======================================"
-    putStrLn "          СОЗДАНИЕ ПОМЕЩЕНИЯ"
-    putStrLn "======================================"
+            purposeResult <- readPurpose
+            case purposeResult of
+                Left err -> do
+                    printError err
+                    mainMenu
+                Right purpose -> do
 
-    nameResult <-
-        readRoomName
-
-    case nameResult of
-        Left err ->
-            pure (Left err)
-
-        Right name -> do
-
-            dimensionsResult <-
-                readDimensions
-
-            case dimensionsResult of
-                Left err ->
-                    pure (Left err)
-
-                Right roomDimensions -> do
-
-                    surfacesResult <-
-                        readSurfaces
-                            materialsPath
-                            roomDimensions
-
-                    case surfacesResult of
-                        Left err ->
-                            pure (Left err)
-
-                        Right roomSurfaces -> do
-
-                            adjustableResult <-
-                                readAdjustableItems
-                                    materialsPath
-
-                            case adjustableResult of
-                                Left err ->
-                                    pure (Left err)
-
-                                Right items ->
-                                    pure
-                                        (Right
-                                            Room
-                                                { roomName =
-                                                    name
-                                                , dimensions =
-                                                    roomDimensions
-                                                , surfaces =
-                                                    roomSurfaces
-                                                , adjustableItems =
-                                                    items
-                                                })
-
-
-readRoomName :: IO (Either AppError String)
-readRoomName = do
-    putStr "Введите название помещения: "
-    hFlush stdout
-
-    name <- getLine
-
-    if null name
-    then do
-        putStrLn
-            "Ошибка: название помещения не может быть пустым."
-        readRoomName
-    else
-        pure (Right name)
-
-
-readDimensions
-    :: IO (Either AppError Dimensions)
-readDimensions = do
-
-    putStrLn ""
-    putStrLn "Введите размеры помещения."
-
-    lengthResult <-
-        readPositiveDouble
-            "Длина, м: "
-
-    case lengthResult of
-        Left err ->
-            pure (Left err)
-
-        Right roomLengthValue -> do
-
-            widthResult <-
-                readPositiveDouble
-                    "Ширина, м: "
-
-            case widthResult of
-                Left err ->
-                    pure (Left err)
-
-                Right roomWidthValue -> do
-
-                    heightResult <-
-                        readPositiveDouble
-                            "Высота, м: "
-
-                    case heightResult of
-                        Left err ->
-                            pure (Left err)
-
-                        Right roomHeightValue ->
-                            pure
-                                (Right
-                                    Dimensions
-                                        { roomLength =
-                                            roomLengthValue
-                                        , roomWidth =
-                                            roomWidthValue
-                                        , roomHeight =
-                                            roomHeightValue
-                                        })
-
-
-readSurface :: FilePath -> Double -> IO (Either AppError Surface)
-readSurface materialsPath area = do
-    putStrLn $
-        "Площадь поверхности: "
-            ++ show area
-            ++ " м²"
-
-    showResult <- showMaterials materialsPath
-
-    case showResult of
-        Left err ->
-            pure (Left err)
-
-        Right () -> do
-            materialResult <- loadMaterials materialsPath
-
-            case materialResult of
-                Left err ->
-                    pure (Left err)
-
-                Right materials -> do
-                    numberResult <-
-                        readIntInRange
-                            "Номер материала: "
-                            1
-                            (length materials)
-
-                    case numberResult of
-                        Left err ->
-                            pure (Left err)
-
-                        Right number -> do
-                            materialResult <-
-                                getMaterialByNumber
-                                    materialsPath
-                                    number
-
-                            case materialResult of
-                                Left err ->
-                                    pure (Left err)
-
-                                Right material ->
-                                    pure
-                                        (Right
-                                            Surface
-                                                { surfaceMaterial =
-                                                    material
-                                                , surfaceArea =
-                                                    area
-                                                })
-
-
-readSurfaces
-    :: FilePath
-    -> Dimensions
-    -> IO (Either AppError [Surface])
-readSurfaces materialsPath dimensions = do
-
-    putStrLn ""
-    putStrLn "======================================"
-    putStrLn "          ПОВЕРХНОСТИ ПОМЕЩЕНИЯ"
-    putStrLn "======================================"
-
-    putStrLn ""
-    putStrLn "Стена 1:"
-    wall1 <-
-        readSurface
-            materialsPath
-            (roomLength dimensions
-                * roomHeight dimensions)
-
-    case wall1 of
-        Left err ->
-            pure (Left err)
-
-        Right surface1 -> do
-
-            putStrLn ""
-            putStrLn "Стена 2:"
-            wall2 <-
-                readSurface
-                    materialsPath
-                    (roomWidth dimensions
-                        * roomHeight dimensions)
-
-            case wall2 of
-                Left err ->
-                    pure (Left err)
-
-                Right surface2 -> do
-
-                    putStrLn ""
-                    putStrLn "Стена 3:"
-                    wall3 <-
-                        readSurface
-                            materialsPath
-                            (roomLength dimensions
-                                * roomHeight dimensions)
-
-                    case wall3 of
-                        Left err ->
-                            pure (Left err)
-
-                        Right surface3 -> do
-
+                    result <- checkAllRooms
+                                file
+                                purpose
+                                (materialsDir ++ "/wall_decor.csv")
+                                (materialsDir ++ "/flour_carpet.csv")
+                                logFile
+                    case result of
+                        Left err -> pure (Left err)
+                        Right batchResult -> do
                             putStrLn ""
-                            putStrLn "Стена 4:"
-                            wall4 <-
-                                readSurface
-                                    materialsPath
-                                    (roomWidth dimensions
-                                        * roomHeight dimensions)
+                            putStrLn $ "Всего помещений: " ++ show (brTotal batchResult)
+                            putStrLn $ "Обработано: "      ++ show (brProcessed batchResult)
+                            putStrLn $ "Пропущено: "       ++ show (brSkipped batchResult)
 
-                            case wall4 of
-                                Left err ->
-                                    pure (Left err)
+                            saveResult <- saveSummaryReport summaryReport batchResult
+                            case saveResult of
+                                Left err -> pure (Left err)
+                                Right () -> do
+                                    putStrLn $ "Сводный отчёт: " ++ summaryReport
+                                    pure (Right ())
 
-                                Right surface4 -> do
-
-                                    putStrLn ""
-                                    putStrLn "Пол:"
-                                    floorSurface <-
-                                        readSurface
-                                            materialsPath
-                                            (roomLength dimensions
-                                                * roomWidth dimensions)
-
-                                    case floorSurface of
-                                        Left err ->
-                                            pure (Left err)
-
-                                        Right floor -> do
-
-                                            putStrLn ""
-                                            putStrLn "Потолок:"
-                                            ceilingSurface <-
-                                                readSurface
-                                                    materialsPath
-                                                    (roomLength dimensions
-                                                        * roomWidth dimensions)
-
-                                            case ceilingSurface of
-                                                Left err ->
-                                                    pure (Left err)
-
-                                                Right ceiling ->
-                                                    pure
-                                                        (Right
-                                                            [ surface1
-                                                            , surface2
-                                                            , surface3
-                                                            , surface4
-                                                            , floor
-                                                            , ceiling
-                                                            ])
-
-
-readAdjustableItem :: FilePath -> IO (Either AppError AdjustableItem)
-readAdjustableItem materialsPath = do
-    showResult <- showRemovableMaterials materialsPath
-
-    case showResult of
-        Left err ->
-            pure (Left err)
-
-        Right removableMaterials -> do
-            let count = length removableMaterials
-
-            numberResult <-
-                readIntInRange
-                    "Номер материала: "
-                    1
-                    count
-
-            case numberResult of
-                Left err ->
-                    pure (Left err)
-
-                Right number -> do
-                    materialResult <-
-                        getRemovableMaterialByNumber
-                            materialsPath
-                            number
-
-                    case materialResult of
-                        Left err ->
-                            pure (Left err)
-
-                        Right material -> do
-                            areaResult <-
-                                readPositiveDouble
-                                    "Площадь элемента, м²: "
-
-                            case areaResult of
-                                Left err ->
-                                    pure (Left err)
-
-                                Right area ->
-                                    pure
-                                        (Right
-                                            AdjustableItem
-                                                { itemName =
-                                                    Material.materialName
-                                                        material
-                                                , itemMaterial =
-                                                    material
-                                                , itemArea =
-                                                    area
-                                                })
-
-readAdjustableItems
-    :: FilePath
-    -> IO (Either AppError [AdjustableItem])
-readAdjustableItems materialsPath = do
-
-    countResult <-
-        readNonNegativeInt
-            "Количество регулируемых элементов: "
-
-    case countResult of
-        Left err ->
-            pure (Left err)
-
-        Right count ->
-            readAdjustableItemsLoop
-                materialsPath
-                count
-                []
-
-
-readAdjustableItemsLoop
-    :: FilePath
-    -> Int
-    -> [AdjustableItem]
-    -> IO (Either AppError [AdjustableItem])
-readAdjustableItemsLoop
-    materialsPath
-    count
-    items
-
-    | count == 0 =
-        pure (Right (reverse items))
-
-    | otherwise = do
-
-        putStrLn ""
-        putStrLn $
-            "Регулируемый элемент "
-                ++ show
-                    (length items + 1)
-                ++ " из "
-                ++ show
-                    (length items + count)
-
-        result <-
-            readAdjustableItem
-                materialsPath
-
-        case result of
-            Left err ->
-                pure (Left err)
-
-            Right item ->
-                readAdjustableItemsLoop
-                    materialsPath
-                    (count - 1)
-                    (item : items)
-
-
-readEvent :: FilePath -> IO (Either AppError EventRequirement)
-readEvent eventsPath = do
-    putStrLn ""
-
-    showResult <- showEventRequirements eventsPath
-
-    case showResult of
-        Left err ->
-            pure (Left err)
-
-        Right () -> do
-            eventsResult <- loadEvents eventsPath
-
-            case eventsResult of
-                Left err ->
-                    pure (Left err)
-
-                Right events -> do
-                    numberResult <-
-                        readIntInRange
-                            "Номер мероприятия: "
-                            1
-                            (length events)
-
-                    case numberResult of
-                        Left err ->
-                            pure (Left err)
-
-                        Right number ->
-                            getEventRequirementByNumber
-                                eventsPath
-                                number
-
-
-checkRoom :: FilePath -> IO (Either AppError ())
-checkRoom eventsPath = do
-    putStrLn ""
-    putStrLn "======================================"
-    putStrLn "           ПРОВЕРКА ПОМЕЩЕНИЯ"
-    putStrLn "======================================"
-
-    roomsResult <- loadRooms roomsFile
-
+deleteRoomMenu :: FilePath -> IO (Either AppError ())
+deleteRoomMenu file = do
+    roomsResult <- loadRooms file
     case roomsResult of
-        Left err ->
-            pure (Left err)
-
-        Right rooms ->
+        Left err -> pure (Left err)
+        Right rooms -> do
             if null rooms
             then do
                 putStrLn "Сохранённых помещений нет."
                 pure (Right ())
-
             else do
-                showRoomsResult <- showRooms roomsFile
+                putStrLn "Сохранённые помещения:"
+                forM_ (zip [1..] rooms) $ \(i, r) ->
+                    putStrLn $ "  " ++ show i ++ ". " ++ roomName r
 
-                case showRoomsResult of
-                    Left err ->
-                        pure (Left err)
+                numResult <- readInRange "Номер для удаления: " 1 (length rooms)
+                case numResult of
+                    Left err -> pure (Left err)
+                    Right n -> deleteRoom file n
 
-                    Right () -> do
-                        numberResult <-
-                            readIntInRange
-                                "Номер помещения: "
-                                1
-                                (length rooms)
+createRoom :: IO (Either AppError Room)
+createRoom = do
+    putStrLn ""
+    putStrLn "--- СОЗДАНИЕ ПОМЕЩЕНИЯ ---"
 
-                        case numberResult of
-                            Left err ->
+    nameResult <- readRoomName
+    case nameResult of
+        Left err -> pure (Left err)
+        Right name -> do
+            dimsResult <- readDimensions
+            case dimsResult of
+                Left err -> pure (Left err)
+                Right dims -> do
+
+                    surfacesResult <- readSurfaces dims
+                    case surfacesResult of
+                        Left err -> pure (Left err)
+                        Right surfaces0 -> do
+
+                            let initialRemaining =
+                                    [(surfaceId s, surfaceArea s) | s <- surfaces0]
+
+                            windowsResult <- readWindows initialRemaining
+                            case windowsResult of
+                                Left err -> pure (Left err)
+                                Right (windows, afterWindows) -> do
+
+                                    doorsResult <- readDoors afterWindows
+                                    case doorsResult of
+                                        Left err -> pure (Left err)
+                                        Right (doors, afterDoors) -> do
+
+                                            decorResult <- readDecorItems afterDoors
+                                            case decorResult of
+                                                Left err -> pure (Left err)
+                                                Right (decor, _) -> do
+
+                                                    let surfaces =
+                                                            attachDecor decor
+                                                            $ attachDoors doors
+                                                            $ attachWindows windows
+                                                            $ surfaces0
+
+                                                    seatsResult <- readSeats dims
+                                                    case seatsResult of
+                                                        Left err -> pure (Left err)
+                                                        Right seats ->
+                                                            pure (Right Room
+                                                                { roomName       = name
+                                                                , roomDimensions = dims
+                                                                , roomSurfaces   = surfaces
+                                                                , roomSeats      = seats
+                                                                })
+
+readRoomName :: IO (Either AppError String)
+readRoomName = do
+    putStr "Название помещения: "
+    hFlush stdout
+    name <- getLine
+    if null name
+    then do
+        putStrLn "Название не может быть пустым."
+        _ <- logWarning logFile "Пустое название помещения"
+        readRoomName
+    else pure (Right name)
+
+readDimensions :: IO (Either AppError Dimensions)
+readDimensions = do
+    lResult <- readPositiveDouble "Длина, м: "
+    case lResult of
+        Left err -> pure (Left err)
+        Right l -> do
+            wResult <- readPositiveDouble "Ширина, м: "
+            case wResult of
+                Left err -> pure (Left err)
+                Right w -> do
+                    hResult <- readPositiveDouble "Высота, м: "
+                    case hResult of
+                        Left err -> pure (Left err)
+                        Right h -> pure (Right (Dimensions l w h))
+
+readSurfaces :: Dimensions -> IO (Either AppError [Surface])
+readSurfaces dims = do
+    let h      = roomHeight dims
+        wall1A = roomLength dims * h
+        wall2A = roomWidth  dims * h
+        wall3A = wall1A
+        wall4A = wall2A
+        floorA = roomLength dims * roomWidth dims
+        ceilA  = floorA
+
+    s1 <- readSurface (Wall 1) wall1A
+    case s1 of
+        Left err -> pure (Left err)
+        Right s1' -> do
+            s2 <- readSurface (Wall 2) wall2A
+            case s2 of
+                Left err -> pure (Left err)
+                Right s2' -> do
+                    s3 <- readSurface (Wall 3) wall3A
+                    case s3 of
+                        Left err -> pure (Left err)
+                        Right s3' -> do
+                            s4 <- readSurface (Wall 4) wall4A
+                            case s4 of
+                                Left err -> pure (Left err)
+                                Right s4' -> do
+                                    sf <- readSurface Floor floorA
+                                    case sf of
+                                        Left err -> pure (Left err)
+                                        Right sf' -> do
+                                            sc <- readSurface Ceiling ceilA
+                                            case sc of
+                                                Left err -> pure (Left err)
+                                                Right sc' -> pure (Right
+                                                    [s1', s2', s3', s4', sf', sc'])
+
+
+readSurface :: SurfaceId -> Double -> IO (Either AppError Surface)
+readSurface sid area = do
+    putStrLn ""
+    putStrLn $ "Поверхность: " ++ show sid
+            ++ " (площадь " ++ show area ++ " м²)"
+
+    materialsResult <- loadSurfaceMaterials (materialsDir ++ "/materials.csv")
+    case materialsResult of
+        Left err -> pure (Left err)
+        Right materials -> do
+            putStrLn "Доступные материалы:"
+            forM_ (zip [1..] materials) $ \(n, m) ->
+                putStrLn $ "  " ++ show n ++ ". " ++ surfaceMaterialName m
+
+            numResult <- readInRange "Номер материала: " 1 (length materials)
+            case numResult of
+                Left err -> pure (Left err)
+                Right n ->
+                    pure (Right Surface
+                        { surfaceId       = sid
+                        , surfaceMaterial = materials !! (n - 1)
+                        , surfaceArea     = area
+                        , surfaceElems    = []
+                        })
+
+readWindows :: [(SurfaceId, Double)] -> IO (Either AppError ([(SurfaceId, Window)], [(SurfaceId, Double)]))
+readWindows remainingSurfaces = do
+    putStrLn ""
+    putStr "Есть ли окна? (y/n): "
+    hFlush stdout
+    answer <- getLine
+    case answer of
+        "n" -> pure (Right ([], remainingSurfaces))
+        "y" -> do
+            countResult <- readPositiveInt "Сколько окон? "
+            case countResult of
+                Left err -> pure (Left err)
+                Right n -> do
+                    result <- readWindowsLoop remainingSurfaces n []
+                    case result of
+                        Left err -> pure (Left err)
+                        Right (windows, remaining') ->
+                            pure (Right (windows, remaining'))
+        _ -> do
+            putStrLn "Ответьте y или n."
+            readWindows remainingSurfaces
+
+
+readWindowsLoop :: [(SurfaceId, Double)] -> Int -> [(SurfaceId, Window)] -> IO (Either AppError ([(SurfaceId, Window)], [(SurfaceId, Double)]))
+readWindowsLoop remainingSurfaces 0 acc =
+    pure (Right (reverse acc, remainingSurfaces))
+readWindowsLoop remainingSurfaces n acc = do
+    putStrLn ""
+    putStrLn $ "Окно " ++ show (length acc + 1) ++ ":"
+
+    putStrLn "На какой стене?"
+    putStrLn "  1 — стена 1"
+    putStrLn "  2 — стена 2"
+    putStrLn "  3 — стена 3"
+    putStrLn "  4 — стена 4"
+
+    wallResult <- readInRange "Номер: " 1 4
+    case wallResult of
+        Left err -> pure (Left err)
+        Right wallN -> do
+            let sid = Wall wallN
+                remaining = fromMaybe 0 (lookup sid remainingSurfaces)
+
+            if remaining <= 0
+            then do
+                putStrLn "На этой стене нет свободной площади."
+                readWindowsLoop remainingSurfaces n acc
+            else do
+                materialsResult <- loadWindowMaterials
+                                    (materialsDir ++ "/windows.csv")
+                case materialsResult of
+                    Left err -> pure (Left err)
+                    Right materials -> do
+                        putStrLn $ "Доступные материалы для " ++ show sid ++ ":"
+                        forM_ (zip [1..] materials) $ \(i, m) ->
+                            putStrLn $ "  " ++ show i ++ ". " ++ windowName m
+
+                        numResult <- readInRange "Номер: " 1 (length materials)
+                        case numResult of
+                            Left err -> pure (Left err)
+                            Right i -> do
+                                putStrLn $ "Осталось площади: "
+                                        ++ show remaining ++ " м²"
+                                areaResult <- readPositiveDoubleInRange
+                                                "Площадь, м²: "
+                                                0
+                                                remaining
+                                case areaResult of
+                                    Left err -> pure (Left err)
+                                    Right area -> do
+                                        let w = Window
+                                                { windowId       =
+                                                    "W" ++ show (length acc + 1)
+                                                , windowMaterial = materials !! (i - 1)
+                                                , windowArea     = area
+                                                }
+                                            newRemaining =
+                                                map (\(sid', r) ->
+                                                        if sid' == sid
+                                                        then (sid', r - area)
+                                                        else (sid', r))
+                                                    remainingSurfaces
+                                        readWindowsLoop newRemaining
+                                                        (n - 1)
+                                                        ((sid, w) : acc)
+
+readDoors :: [(SurfaceId, Double)] -> IO (Either AppError ([(SurfaceId, Door)], [(SurfaceId, Double)]))
+readDoors remainingSurfaces = do
+    putStrLn ""
+    putStr "Есть ли двери? (y/n): "
+    hFlush stdout
+    answer <- getLine
+    case answer of
+        "n" -> pure (Right ([], remainingSurfaces))
+        "y" -> do
+            countResult <- readPositiveInt "Сколько дверей? "
+            case countResult of
+                Left err -> pure (Left err)
+                Right n -> do
+                    result <- readDoorsLoop remainingSurfaces n []
+                    case result of
+                        Left err -> pure (Left err)
+                        Right (doors, remaining') ->
+                            pure (Right (doors, remaining'))
+        _ -> do
+            putStrLn "Ответьте y или n."
+            readDoors remainingSurfaces
+
+readDoorsLoop :: [(SurfaceId, Double)] -> Int -> [(SurfaceId, Door)] -> IO (Either AppError ([(SurfaceId, Door)], [(SurfaceId, Double)]))
+readDoorsLoop remainingSurfaces 0 acc =
+    pure (Right (reverse acc, remainingSurfaces))
+readDoorsLoop remainingSurfaces n acc = do
+    putStrLn ""
+    putStrLn $ "Дверь " ++ show (length acc + 1) ++ ":"
+
+    putStrLn "На какой стене?"
+    putStrLn "  1 — стена 1"
+    putStrLn "  2 — стена 2"
+    putStrLn "  3 — стена 3"
+    putStrLn "  4 — стена 4"
+
+    wallResult <- readInRange "Номер: " 1 4
+    case wallResult of
+        Left err -> pure (Left err)
+        Right wallN -> do
+            let sid = Wall wallN
+                remaining = fromMaybe 0 (lookup sid remainingSurfaces)
+
+            if remaining <= 0
+            then do
+                putStrLn "На этой стене нет свободной площади."
+                readDoorsLoop remainingSurfaces n acc
+            else do
+                materialsResult <- loadDoorMaterials
+                                    (materialsDir ++ "/doors.csv")
+                case materialsResult of
+                    Left err -> pure (Left err)
+                    Right materials -> do
+                        putStrLn $ "Доступные материалы для " ++ show sid ++ ":"
+                        forM_ (zip [1..] materials) $ \(i, m) ->
+                            putStrLn $ "  " ++ show i ++ ". " ++ doorName m
+
+                        numResult <- readInRange "Номер: " 1 (length materials)
+                        case numResult of
+                            Left err -> pure (Left err)
+                            Right i -> do
+                                putStrLn $ "Осталось площади: "
+                                        ++ show remaining ++ " м²"
+                                areaResult <- readPositiveDoubleInRange
+                                                "Площадь, м²: "
+                                                0
+                                                remaining
+                                case areaResult of
+                                    Left err -> pure (Left err)
+                                    Right area -> do
+                                        let d = Door
+                                                { doorId       =
+                                                    "D" ++ show (length acc + 1)
+                                                , doorMaterial = materials !! (i - 1)
+                                                , doorArea     = area
+                                                }
+                                            newRemaining =
+                                                map (\(sid', r) ->
+                                                        if sid' == sid
+                                                        then (sid', r - area)
+                                                        else (sid', r))
+                                                    remainingSurfaces
+                                        readDoorsLoop newRemaining
+                                                      (n - 1)
+                                                      ((sid, d) : acc)
+
+readDecorItems :: [(SurfaceId, Double)] -> IO (Either AppError ([(SurfaceId, DecorItem)], [(SurfaceId, Double)]))
+readDecorItems remainingSurfaces = do
+    putStrLn ""
+    putStr "Есть ли элементы интерьера (ковры, занавесы)? (y/n): "
+    hFlush stdout
+    answer <- getLine
+    case answer of
+        "n" -> pure (Right ([], remainingSurfaces))
+        "y" -> do
+            countResult <- readPositiveInt "Сколько? "
+            case countResult of
+                Left err -> pure (Left err)
+                Right n -> do
+                    result <- readDecorLoop remainingSurfaces n []
+                    case result of
+                        Left err -> pure (Left err)
+                        Right (decor, remaining') ->
+                            pure (Right (decor, remaining'))
+        _ -> do
+            putStrLn "Ответьте y или n."
+            readDecorItems remainingSurfaces
+
+
+readDecorLoop :: [(SurfaceId, Double)] -> Int -> [(SurfaceId, DecorItem)] -> IO (Either AppError ([(SurfaceId, DecorItem)], [(SurfaceId, Double)]))
+readDecorLoop remainingSurfaces 0 acc =
+    pure (Right (reverse acc, remainingSurfaces))
+readDecorLoop remainingSurfaces n acc = do
+    putStrLn ""
+    putStrLn $ "Элемент " ++ show (length acc + 1) ++ ":"
+
+    putStrLn "На какой поверхности?"
+    putStrLn "  1 — стена 1"
+    putStrLn "  2 — стена 2"
+    putStrLn "  3 — стена 3"
+    putStrLn "  4 — стена 4"
+    putStrLn "  5 — пол"
+    putStrLn "  6 — потолок"
+
+    surfResult <- readInRange "Номер: " 1 6
+    case surfResult of
+        Left err -> pure (Left err)
+        Right n1 -> do
+            let sid = case n1 of
+                        1 -> Wall 1
+                        2 -> Wall 2
+                        3 -> Wall 3
+                        4 -> Wall 4
+                        5 -> Floor
+                        _ -> Ceiling
+
+            let remaining = fromMaybe 0 (lookup sid remainingSurfaces)
+
+            if remaining <= 0
+            then do
+                putStrLn "На этой поверхности нет свободной площади."
+                readDecorLoop remainingSurfaces n acc
+            else do
+                let decorFile = case sid of
+                        Floor -> materialsDir ++ "/flour_carpet.csv"
+                        _     -> materialsDir ++ "/wall_decor.csv"
+
+                materialsResult <- loadWallDecor decorFile
+                case materialsResult of
+                    Left err -> pure (Left err)
+                    Right materials -> do
+                        putStrLn $ "Доступные материалы для " ++ show sid ++ ":"
+                        forM_ (zip [1..] materials) $ \(i, m) ->
+                            putStrLn $ "  " ++ show i ++ ". " ++ decorName m
+
+                        numResult <- readInRange "Номер: " 1 (length materials)
+                        case numResult of
+                            Left err -> pure (Left err)
+                            Right i -> do
+                                putStrLn $ "Осталось площади: "
+                                        ++ show remaining ++ " м²"
+                                areaResult <- readPositiveDoubleInRange
+                                                "Площадь, м²: "
+                                                0
+                                                remaining
+                                case areaResult of
+                                    Left err -> pure (Left err)
+                                    Right area -> do
+                                        let di = DecorItem
+                                                { decorMaterial = materials !! (i - 1)
+                                                , decorArea     = area
+                                                }
+                                            newRemaining =
+                                                map (\(sid', r) ->
+                                                        if sid' == sid
+                                                        then (sid', r - area)
+                                                        else (sid', r))
+                                                    remainingSurfaces
+                                        readDecorLoop newRemaining
+                                                      (n - 1)
+                                                      ((sid, di) : acc)
+
+attachWindows :: [(SurfaceId, Window)] -> [Surface] -> [Surface]
+attachWindows items = map addTo
+  where
+    addTo s =
+        let sid = surfaceId s
+            matching = [w | (sid', w) <- items, sid' == sid]
+            elems = [ElemWindow w | w <- matching]
+        in s { surfaceElems = surfaceElems s ++ elems }
+
+
+attachDoors :: [(SurfaceId, Door)] -> [Surface] -> [Surface]
+attachDoors items = map addTo
+  where
+    addTo s =
+        let sid = surfaceId s
+            matching = [d | (sid', d) <- items, sid' == sid]
+            elems = [ElemDoor d | d <- matching]
+        in s { surfaceElems = surfaceElems s ++ elems }
+
+
+attachDecor :: [(SurfaceId, DecorItem)] -> [Surface] -> [Surface]
+attachDecor items = map addTo
+  where
+    addTo s =
+        let sid = surfaceId s
+            matching = [d | (sid', d) <- items, sid' == sid]
+            elems = [ElemDecor d | d <- matching]
+        in s { surfaceElems = surfaceElems s ++ elems }
+
+readSeats :: Dimensions -> IO (Either AppError [SeatItem])
+readSeats dims = do
+    putStrLn ""
+    putStr "Сколько типов сидячих мест? (0 — нет): "
+    hFlush stdout
+    input <- getLine
+    case readMaybe input of
+        Nothing -> do
+            putStrLn "Нужно число."
+            readSeats dims
+        Just 0 -> pure (Right [])
+        Just n -> readSeatsLoop (calculateFloorArea dims) n []
+
+
+readSeatsLoop :: Double -> Int -> [SeatItem] -> IO (Either AppError [SeatItem])
+readSeatsLoop _ 0 acc = pure (Right (reverse acc))
+readSeatsLoop remainingArea n acc = do
+    materialsResult <- loadSeatMaterials (materialsDir ++ "/sofa.csv")
+    case materialsResult of
+        Left err -> pure (Left err)
+        Right materials -> do
+            putStrLn ""
+            putStrLn "Доступные сидячие места:"
+            forM_ (zip [1..] materials) $ \(i, m) ->
+                putStrLn $ "  " ++ show i ++ ". " ++ seatName m
+                        ++ " (" ++ show (seatFloorAreaPerUnit m) ++ " м²/место)"
+
+            numResult <- readInRange "Номер: " 1 (length materials)
+            case numResult of
+                Left err -> pure (Left err)
+                Right i -> do
+                    let seatMat = materials !! (i - 1)
+                        seatA   = seatFloorAreaPerUnit seatMat
+                        maxN    = if seatA <= 0
+                                  then 0
+                                  else floor (remainingArea / seatA)
+
+                    putStrLn $ "Осталось площади пола: "
+                            ++ show remainingArea ++ " м²"
+                    putStrLn $ "Максимум мест для этого типа: " ++ show maxN
+
+                    cntResult <- readInRange "Количество: " 0 maxN
+                    case cntResult of
+                        Left err -> pure (Left err)
+                        Right cnt -> do
+                            let newRemaining = remainingArea
+                                             - fromIntegral cnt * seatA
+                                newAcc = SeatItem cnt seatMat : acc
+                            readSeatsLoop newRemaining (n - 1) newAcc
+
+readPurpose :: IO (Either AppError PurposeReq)
+readPurpose = do
+    purposesResult <- loadPurpose (materialsDir ++ "/purpose.csv")
+    case purposesResult of
+        Left err -> pure (Left err)
+        Right purposes -> do
+            putStrLn ""
+            putStrLn "Доступные назначения:"
+            forM_ (zip [1..] purposes) $ \(n, p) ->
+                putStrLn $ "  " ++ show n ++ ". " ++ purposeName p
+
+            numResult <- readInRange "Номер назначения: " 1 (length purposes)
+            case numResult of
+                Left err -> pure (Left err)
+                Right n -> pure (Right (purposes !! (n - 1)))
+
+checkRoom :: Room -> PurposeReq -> IO (Either AppError ())
+checkRoom room purpose = do
+    let volume     = calculateVolume (roomDimensions room)
+        commonArea = calculateCommonArea (roomDimensions room) (roomSeats room)
+        absorption = calculateTotalAbsorption
+                        (roomSurfaces room) (roomSeats room) commonArea
+        reverb     = calculateReverberationSpectrum volume absorption commonArea
+        acoustic = AcousticResult
+            { roomVolume        = volume
+            , commonArea        = commonArea
+            , totalAbsorption   = absorption
+            , reverberationTime = reverb
+            }
+        suitability = evaluateSuitability acoustic purpose
+
+    putStrLn ""
+    putStrLn "=========================================="
+    putStrLn "   ИСХОДНЫЙ РЕЗУЛЬТАТ"
+    putStrLn "=========================================="
+    printAcousticTable acoustic
+    putStrLn ""
+    printSuitability suitability
+    putStrLn ""
+
+    if suitable suitability
+    then do
+        _ <- logInfo logFile ("Помещение пригодно: " ++ roomName room)
+        pure ()
+    else do
+        _ <- logWarning logFile ("Помещение не пригодно: " ++ roomName room)
+        pure ()
+
+    wallResult <- loadWallDecor (materialsDir ++ "/wall_decor.csv")
+    case wallResult of
+        Left err -> pure (Left err)
+        Right wallCatalog -> do
+            floorResult <- loadFloorDecor (materialsDir ++ "/flour_carpet.csv")
+            case floorResult of
+                Left err -> pure (Left err)
+                Right floorCatalog -> do
+                    let catalog = wallCatalog ++ floorCatalog
+
+                    let reachable = isAchievable room purpose acoustic catalog
+
+                    if not reachable
+                    then do
+                        putStrLn "=========================================="
+                        putStrLn "   РЕКОМЕНДАЦИИ"
+                        putStrLn "=========================================="
+                        putStrLn "По данной модели норматив не достигается."
+                        putStrLn ""
+
+                        let report = Report
+                                { reportRoom              = room
+                                , reportPurpose           = purpose
+                                , reportAcousticBefore    = acoustic
+                                , reportSuitabilityBefore = suitability
+                                , reportAcousticAfter     = acoustic
+                                , reportSuitabilityAfter  = suitability
+                                , reportRecommendations   = []
+                                }
+
+                        let reportPath = reportDir ++ "/" ++ roomName room ++ ".txt"
+                        saveResult <- saveReport reportPath report
+                        case saveResult of
+                            Left err -> do
+                                _ <- logError logFile
+                                        ("Ошибка сохранения отчёта: " ++ show err)
                                 pure (Left err)
+                            Right () -> do
+                                putStrLn $ "Отчёт сохранён: " ++ reportPath
+                                pure (Right ())
 
-                            Right number -> do
-                                roomResult <-
-                                    getRoomByNumber
-                                        roomsFile
-                                        number
+                    else do
+                        let recommendations = generateRecommendations
+                                                room purpose acoustic suitability
+                                                wallCatalog
+                                                floorCatalog 
+                        putStrLn "=========================================="
+                        putStrLn "   РЕКОМЕНДАЦИИ"
+                        putStrLn "=========================================="
+                        printRecommendations recommendations
+                        putStrLn ""
 
-                                case roomResult of
-                                    Left err ->
-                                        pure (Left err)
+                        putStrLn "=========================================="
+                        putStrLn "   ПРОМЕЖУТОЧНЫЕ РЕЗУЛЬТАТЫ"
+                        putStrLn "=========================================="
+                        printIntermediateSteps recommendations
+                        putStrLn ""
 
-                                    Right room -> do
-                                        putStrLn ""
-                                        putStrLn $
-                                            "Помещение: "
-                                                ++ roomName room
+                        let newRoom        = applyRecommendations recommendations room
+                            newAcoustic    = recalculateAcoustic newRoom
+                            newSuitability = evaluateSuitability newAcoustic purpose
 
-                                        eventResult <-
-                                            readEvent eventsPath
+                        putStrLn "=========================================="
+                        putStrLn "   ИТОГОВЫЙ РЕЗУЛЬТАТ"
+                        putStrLn "=========================================="
+                        printAcousticTable newAcoustic
+                        putStrLn ""
+                        printSuitability newSuitability
+                        putStrLn ""
 
-                                        case eventResult of
-                                            Left err ->
-                                                pure (Left err)
+                        let report = Report
+                                { reportRoom              = room
+                                , reportPurpose           = purpose
+                                , reportAcousticBefore    = acoustic
+                                , reportSuitabilityBefore = suitability
+                                , reportAcousticAfter     = newAcoustic
+                                , reportSuitabilityAfter  = newSuitability
+                                , reportRecommendations   = recommendations
+                                }
 
-                                            Right event -> do
-                                                putStrLn ""
-                                                putStrLn $
-                                                    "Мероприятие: "
-                                                        ++ eventName
-                                                            (eventType event)
-
-                                                let volume =
-                                                        calculateVolume
-                                                            (dimensions room)
-
-                                                let absorption =
-                                                        calculateAbsorptionArea
-                                                            room
-
-                                                let reverb =
-                                                        calculateReverberationTime
-                                                            volume
-                                                            absorption
-
-                                                let acoustic =
-                                                        AcousticResult
-                                                            { roomVolume =
-                                                                volume
-                                                            , absorptionArea =
-                                                                absorption
-                                                            , reverberationTime =
-                                                                reverb
-                                                            }
-
-                                                let suitability =
-                                                        evaluateSuitability
-                                                            acoustic
-                                                            event
-
-                                                let recommendations =
-                                                        generateRecommendations
-                                                            room
-                                                            event
-                                                            acoustic
-                                                            suitability
-
-                                                let report =
-                                                        Report
-                                                            { reportRoom =
-                                                                room
-                                                            , reportEvent =
-                                                                event
-                                                            , reportAcoustic =
-                                                                acoustic
-                                                            , reportSuitability =
-                                                                suitability
-                                                            , reportRecommendations =
-                                                                recommendations
-                                                            }
-
-                                                putStrLn ""
-                                                putStrLn "=== РЕЗУЛЬТАТ РАСЧЁТА ==="
-
-                                                putStrLn $
-                                                    "Объём: "
-                                                        ++ show volume
-                                                        ++ " м³"
-
-                                                putStrLn $
-                                                    "Эквивалентная площадь звукопоглощения: "
-                                                        ++ show absorption
-                                                        ++ " м²"
-
-                                                putStrLn $
-                                                    "Время реверберации: "
-                                                        ++ show reverb
-                                                        ++ " с"
-
-                                                putStrLn $
-                                                    "Норма RT60: "
-                                                        ++ show
-                                                            (fst
-                                                                (recommendedReverb event))
-                                                        ++ " - "
-                                                        ++ show
-                                                            (snd
-                                                                (recommendedReverb event))
-                                                        ++ " с"
-
-                                                putStrLn ""
-
-                                                if suitable suitability
-                                                then do
-                                                    _ <-
-                                                        logInfo
-                                                            logFile
-                                                            ("Помещение соответствует требованиям: "
-                                                                ++ roomName room)
-                                                    pure ()
-                                                else do
-                                                    _ <-
-                                                        logWarning
-                                                            logFile
-                                                            ("Помещение не соответствует требованиям: "
-                                                                ++ roomName room)
-                                                    pure ()
-                                                putStrLn ""
-                                                putStrLn "=== РЕКОМЕНДАЦИИ ==="
-
-                                                if null recommendations
-                                                then
-                                                    putStrLn
-                                                        "Рекомендации отсутствуют."
-                                                else
-                                                    mapM_
-                                                        printRecommendation
-                                                        (zip
-                                                            [1..]
-                                                            recommendations)
-
-                                                reportResult <-
-                                                    saveReport
-                                                        reportFile
-                                                        report
-
-                                                case reportResult of
-                                                    Left err -> do
-                                                        _ <-
-                                                            logError
-                                                                logFile
-                                                                ("Ошибка сохранения отчёта: "
-                                                                    ++ show err)
-
-                                                        pure (Left err)
-
-                                                    Right () -> do
-                                                        putStrLn ""
-                                                        putStrLn $
-                                                            "Отчёт сохранён в: "
-                                                                ++ reportFile
-                                                        _ <-
-                                                            logInfo
-                                                                logFile
-                                                                ("Отчёт сохранён для помещения: "
-                                                                    ++ roomName room)
-                                                        pure (Right ())
-
-
-printRecommendation
-    :: (Int, Recommendation)
-    -> IO ()
-printRecommendation
-    (number, recommendation) = do
-
-    putStrLn $
-        show number
-            ++ ". "
-            ++ action recommendation
-
-    putStrLn $
-        "   Материал: "
-            ++ materialName recommendation
-
-    putStrLn $
-        "   RT60: "
-            ++ show
-                (previousReverb recommendation)
-            ++ " -> "
-            ++ show
-                (newReverb recommendation)
-            ++ " с"
-
-    putStrLn $
-        "   "
-            ++ recommendationResult
-                (result recommendation)
-
-
-recommendationResult
-    :: SuitabilityResult
-    -> String
-recommendationResult suitability
-
-    | suitable suitability =
-        "После изменения помещение соответствует нормативу."
-
-    | otherwise =
-        "После изменения помещение всё ещё не соответствует нормативу."
+                        let reportPath = reportDir ++ "/" ++ roomName room ++ ".txt"
+                        saveResult <- saveReport reportPath report
+                        case saveResult of
+                            Left err -> do
+                                _ <- logError logFile
+                                        ("Ошибка сохранения отчёта: " ++ show err)
+                                pure (Left err)
+                            Right () -> do
+                                putStrLn $ "Отчёт сохранён: " ++ reportPath
+                                pure (Right ())
 
 
 readInt :: String -> IO (Either AppError Int)
-readInt message = do
-    putStr message
+readInt prompt = do
+    putStr prompt
     hFlush stdout
-
     input <- getLine
-
     case readMaybe input of
         Nothing -> do
-            putStrLn "Ошибка: нужно ввести целое число."
-
-            _ <-
-                logWarning
-                        logFile
-                        ("Некорректный ввод целого числа: " ++ input)
-
-            readInt message
-
-        Just value ->
-            pure (Right value)
+            putStrLn "Нужно целое число."
+            _ <- logWarning logFile
+                    ("Некорректный ввод целого числа: " ++ input)
+            readInt prompt
+        Just n -> pure (Right n)
 
 
 readPositiveInt :: String -> IO (Either AppError Int)
-readPositiveInt message = do
-    result <- readInt message
-
+readPositiveInt prompt = do
+    result <- readInt prompt
     case result of
-        Left err ->
-            pure (Left err)
-
-        Right value ->
-            if value > 0
-            then
-                pure (Right value)
-            else do
-                putStrLn "Ошибка: число должно быть больше нуля."
-
-                _ <-
-                    logWarning
-                            logFile
-                            ( "Некорректное положительное число: "
-                                ++ show value
-                            )
-
-                readPositiveInt message
-
-
-readNonNegativeInt :: String -> IO (Either AppError Int)
-readNonNegativeInt message = do
-    result <- readInt message
-
-    case result of
-        Left err ->
-            pure (Left err)
-
-        Right value ->
-            if value >= 0
-            then
-                pure (Right value)
-            else do
-                putStrLn "Ошибка: число не может быть отрицательным."
-
-                _ <-
-                    logWarning
-                        logFile
-                        ( "Некорректное положительное число: "
-                            ++ show value
-                        )
-
-                readNonNegativeInt message
+        Left err -> pure (Left err)
+        Right n
+            | n > 0     -> pure (Right n)
+            | otherwise -> do
+                putStrLn "Число должно быть > 0."
+                _ <- logWarning logFile
+                        ("Некорректное положительное число: "
+                         ++ show n) 
+                readPositiveInt prompt
 
 
 readDouble :: String -> IO (Either AppError Double)
-readDouble message = do
-    putStr message
+readDouble prompt = do
+    putStr prompt
     hFlush stdout
-
     input <- getLine
-
     case readMaybe input of
         Nothing -> do
-            putStrLn "Ошибка: нужно ввести число."
-
-            _ <-
-                logWarning
-                    logFile
+            putStrLn "Нужно число."
+            _ <- logWarning logFile
                     ("Некорректный ввод числа: " ++ input)
-
-            readDouble message
-
-        Just value ->
-            pure (Right value)
+            readDouble prompt
+        Just x -> pure (Right x)
 
 
 readPositiveDouble :: String -> IO (Either AppError Double)
-readPositiveDouble message = do
-    result <- readDouble message
-
+readPositiveDouble prompt = do
+    result <- readDouble prompt
     case result of
-        Left err ->
-            pure (Left err)
+        Left err -> pure (Left err)
+        Right x
+            | x > 0     -> pure (Right x)
+            | otherwise -> do
+                putStrLn "Число должно быть > 0."
+                _ <- logWarning logFile
+                        ("Некорректное положительное число: "
+                         ++ show x)   
+                readPositiveDouble prompt
 
-        Right value ->
-            if value > 0
-            then
-                pure (Right value)
-            else do
-                putStrLn "Ошибка: число должно быть больше нуля."
 
-                _ <-
-                    logWarning
-                            logFile
-                            ( "Некорректное положительное число: "
-                                ++ show value
-                            )
-
-                readPositiveDouble message
-
-readIntInRange
-    :: String
-    -> Int
-    -> Int
-    -> IO (Either AppError Int)
-readIntInRange message minValue maxValue = do
-    result <- readInt message
-
+readPositiveDoubleInRange :: String -> Double -> Double -> IO (Either AppError Double)
+readPositiveDoubleInRange prompt lo hi = do
+    result <- readDouble prompt
     case result of
-        Left err ->
-            pure (Left err)
+        Left err -> pure (Left err)
+        Right x
+            | x <= lo   -> do
+                putStrLn $ "Число должно быть > " ++ show lo
+                _ <- logWarning logFile
+                        ("Число вне диапазона: " ++ show x
+                         ++ " (ожидалось > " ++ show lo ++ ")")
+                readPositiveDoubleInRange prompt lo hi
+            | x > hi    -> do
+                putStrLn $ "Число должно быть ≤ " ++ show hi
+                _ <- logWarning logFile
+                        ("Число вне диапазона: " ++ show x
+                         ++ " (ожидалось ≤ " ++ show hi ++ ")") 
+                readPositiveDoubleInRange prompt lo hi
+            | otherwise -> pure (Right x)
 
-        Right value ->
-            if value >= minValue && value <= maxValue
-            then
-                pure (Right value)
-            else do
-                putStrLn $
-                    "Ошибка: введите число от "
-                        ++ show minValue
-                        ++ " до "
-                        ++ show maxValue
-                        ++ "."
-                _ <-
-                    logWarning
-                        logFile
-                        ( "Число вне допустимого диапазона: "
-                            ++ show value
-                            ++ " (ожидалось от "
-                            ++ show minValue
-                            ++ " до "
-                            ++ show maxValue
-                            ++ ")"
-                        )
-                readIntInRange
-                    message
-                    minValue
-                    maxValue
 
-printError
-    :: AppError
-    -> IO ()
+readInRange :: String -> Int -> Int -> IO (Either AppError Int)
+readInRange prompt lo hi = do
+    result <- readInt prompt
+    case result of
+        Left err -> pure (Left err)
+        Right n
+            | n >= lo && n <= hi -> pure (Right n)
+            | otherwise -> do
+                putStrLn $ "Число от " ++ show lo ++ " до " ++ show hi
+                _ <- logWarning logFile
+                        ("Число вне диапазона: " ++ show n
+                         ++ " (ожидалось от " ++ show lo
+                         ++ " до " ++ show hi ++ ")")
+                readInRange prompt lo hi
+
+
+printAcousticTable :: AcousticResult -> IO ()
+printAcousticTable acoustic = do
+    putStrLn "Частота  | A, м²·сэбин | T, с"
+    putStrLn "---------|-------------|------"
+    printRow "125 Гц"  (at125  a) (at125  t)
+    printRow "500 Гц"  (at500  a) (at500  t)
+    printRow "2000 Гц" (at2000 a) (at2000 t)
+  where
+    a = totalAbsorption acoustic
+    t = reverberationTime acoustic
+    printRow f av tv =
+        putStrLn $ f ++ " | " ++ show av ++ " | " ++ show tv
+
+
+printSuitability :: SuitabilityResult -> IO ()
+printSuitability suitability = do
+    putStrLn $ "Относительное отклонение: " ++ show (relativeDev suitability)
+    putStrLn $ "Оценка: " ++ gradeText (grade suitability)
+
+
+gradeText :: Grade -> String
+gradeText Suitable              = "ПРИГОДНО"
+gradeText ConditionallySuitable = "УСЛОВНО ПРИГОДНО"
+gradeText Unsuitable            = "НЕ ПРИГОДНО"
+
+
+printRecommendations :: [Recommendation] -> IO ()
+printRecommendations [] = putStrLn "Рекомендации не требуются."
+printRecommendations recs = do
+    forM_ (zip [1..] recs) $ \(n, r) -> do
+        putStrLn $ show n ++ ". " ++ actionText (action r)
+            ++ " " ++ decorName (targetElement r)
+        putStrLn $ "   Поверхность: " ++ show (targetSurface r)
+        putStrLn $ "   Площадь: " ++ show (recommendedArea r) ++ " м²"
+
+
+actionText :: Action -> String
+actionText Add    = "Добавить"
+actionText Remove = "Убрать"
+
+handleResult :: Either AppError () -> IO ()
+handleResult (Left err)  = printError err
+handleResult (Right ())  = pure ()
+
+
+printError :: AppError -> IO ()
 printError err = do
-
     putStrLn ""
-    putStrLn $
-        "Ошибка: "
-            ++ show err
+    putStrLn $ "Ошибка: " ++ show err
+    _ <- logError logFile (show err)
+    pure ()
+
+printIntermediateSteps :: [Recommendation] -> IO ()
+printIntermediateSteps [] = putStrLn "Промежуточных шагов нет."
+printIntermediateSteps recs = do
+    forM_ (zip [1..] recs) $ \(n, r) -> do
+        putStrLn $ "Шаг " ++ show n ++ ": "
+                ++ actionText (action r) ++ " "
+                ++ decorName (targetElement r)
+                ++ " на " ++ show (targetSurface r)
+                ++ " (" ++ show (recommendedArea r) ++ " м²)"
+        putStrLn $ "  RT60 до:    " ++ formatSpectrum (previousReverb r)
+        putStrLn $ "  RT60 после: " ++ formatSpectrum (newReverb r)
+        putStrLn ""
+
+formatSpectrum :: Spectrum -> String
+formatSpectrum s =
+    show (at125 s) ++ " / " ++
+    show (at500 s) ++ " / " ++
+    show (at2000 s) ++ " с"
