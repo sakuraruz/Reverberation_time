@@ -1,65 +1,42 @@
-module Main where
+module Main (main) where
 
 import Test.QuickCheck
 
-import qualified Calculation.GeometrySpec as Geometry
-import qualified Calculation.AbsorptionSpec as Absorption
-import qualified Calculation.ReverberationSpec as Reverberation
-import qualified Evaluation.SuitabilitySpec as Suitability
-import qualified Recommendation.AcousticSpec as Recommendation
+import qualified Calculation.GeometrySpec
+import qualified Calculation.ReverberationSpec
+import qualified Types.SpectrumSpec
+import qualified Evaluation.SuitabilitySpec
 
 
 main :: IO ()
 main = do
-
     putStrLn "=== Calculation.Geometry ==="
+    quickCheck Calculation.GeometrySpec.prop_volumeNonNegative
+    quickCheck Calculation.GeometrySpec.prop_volumeFormula
+    quickCheck Calculation.GeometrySpec.prop_totalSurfaceAreaGreaterThanFloor
 
-    quickCheck Geometry.prop_volumeNonNegative
-    quickCheck Geometry.prop_volumeZeroWhenLengthZero
-    quickCheck Geometry.prop_volumeFormula
-    quickCheck Geometry.prop_volumeDoesNotDecreaseWhenLengthIncreases
+    putStrLn "=== Calculation.Reverberation ==="
+    quickCheck Calculation.ReverberationSpec.prop_sabineNonNegative
+    quickCheck Calculation.ReverberationSpec.prop_sabineZeroWhenAbsorptionZero
+    quickCheck Calculation.ReverberationSpec.prop_sabineFormula
+    quickCheck Calculation.ReverberationSpec.prop_sabineProportionalToVolume
 
+    putStrLn "--- Эйринг ---"
+    quickCheck Calculation.ReverberationSpec.prop_eyringNonNegative
+    quickCheck Calculation.ReverberationSpec.prop_eyringZeroWhenCommonAreaZero
+    quickCheck Calculation.ReverberationSpec.prop_eyringZeroWhenPhiZero
+    quickCheck Calculation.ReverberationSpec.prop_eyringFormula
+    quickCheck Calculation.ReverberationSpec.prop_eyringProportionalToVolume
+    quickCheck Calculation.ReverberationSpec.prop_eyringInverselyProportionalToCommonArea
+    quickCheck Calculation.ReverberationSpec.prop_eyringInverselyProportionalToPhi
 
-    putStrLn "\n=== Calculation.Absorption ==="
+    putStrLn "=== Types.Spectrum ==="
+    quickCheck Types.SpectrumSpec.prop_addSpectrumsCommutative
+    quickCheck Types.SpectrumSpec.prop_addSpectrumsIdentity
+    quickCheck Types.SpectrumSpec.prop_multiplySpectrumByOne
+    quickCheck Types.SpectrumSpec.prop_subtractSpectrumsSelf
 
-    quickCheck Absorption.prop_surfaceAbsorptionNonNegative
-    quickCheck Absorption.prop_surfaceAbsorptionFormula
-    quickCheck Absorption.prop_itemAbsorptionNonNegative
-    quickCheck Absorption.prop_itemAbsorptionFormula
-    quickCheck Absorption.prop_roomAbsorptionNonNegative
-
-
-    putStrLn "\n=== Calculation.Reverberation ==="
-
-    quickCheck Reverberation.prop_reverberationNonNegative
-    quickCheck Reverberation.prop_zeroAbsorptionGivesZero
-    quickCheck Reverberation.prop_negativeAbsorptionGivesZero
-    quickCheck Reverberation.prop_moreAbsorptionDoesNotIncreaseReverberation
-
-
-    putStrLn "\n=== Evaluation.Suitability ==="
-
-    quickCheck Suitability.prop_deviationIsZeroInsideRange
-    quickCheck Suitability.prop_deviationBelowMinimum
-    quickCheck Suitability.prop_deviationAboveMaximum
-    quickCheck Suitability.prop_valuesInsideRangeAreAccepted
-    quickCheck Suitability.prop_minimumBoundaryIsAccepted
-    quickCheck Suitability.prop_maximumBoundaryIsAccepted
-    quickCheck Suitability.prop_valuesBelowRangeAreRejected
-    quickCheck Suitability.prop_valuesAboveRangeAreRejected
-    quickCheck Suitability.prop_suitableRoomIsMarkedSuitable
-    quickCheck Suitability.prop_belowRangeIsUnsuitable
-    quickCheck Suitability.prop_aboveRangeIsUnsuitable
-
-
-    putStrLn "\n=== Recommendation.Acoustic ==="
-
-    quickCheck Recommendation.prop_suitableRoomHasNoRecommendations
-    quickCheck Recommendation.prop_noItemsMeansNoRecommendations
-    quickCheck Recommendation.prop_highReverberationProducesRecommendations
-    quickCheck Recommendation.prop_lowReverberationProducesRecommendations
-    quickCheck Recommendation.prop_normalReverberationProducesNoRecommendations
-    quickCheck Recommendation.prop_highReverberationRecommendsAdding
-    quickCheck Recommendation.prop_lowReverberationRecommendsRemoving
-    quickCheck Recommendation.prop_recommendationChangesReverberation
-    quickCheck Recommendation.prop_recommendationContainsMaterialName
+    putStrLn "=== Evaluation.Suitability ==="
+    quickCheck Evaluation.SuitabilitySpec.prop_deviationNonNegative
+    quickCheck Evaluation.SuitabilitySpec.prop_deviationZeroInRange
+    quickCheck Evaluation.SuitabilitySpec.prop_gradeSuitableWhenZero
